@@ -62,17 +62,22 @@ const isAllowedOrigin = (origin?: string) => {
     return origin.endsWith('.vercel.app');
 };
 
-// Middleware
-app.use(cors({
+const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
         if (isAllowedOrigin(origin)) {
             callback(null, true);
             return;
         }
-        callback(new Error('Not allowed by CORS'));
+        callback(null, false);
     },
     credentials: true,
-}));
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+// Middleware
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -116,7 +121,7 @@ const io = new SocketIOServer(server, {
                 callback(null, true);
                 return;
             }
-            callback(new Error('Not allowed by Socket CORS'));
+            callback(null, false);
         },
         methods: ["GET", "POST"],
         credentials: true
