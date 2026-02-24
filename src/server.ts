@@ -42,9 +42,35 @@ export const logger = winston.createLogger({
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const staticAllowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+    'https://bookmypandit.vercel.app',
+];
+
+const envAllowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+const allowedOrigins = [...new Set([...staticAllowedOrigins, ...envAllowedOrigins])];
+
+const isAllowedOrigin = (origin?: string) => {
+    if (!origin) return true;
+    if (allowedOrigins.includes(origin)) return true;
+    return origin.endsWith('.vercel.app');
+};
+
 // Middleware
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+    origin: (origin, callback) => {
+        if (isAllowedOrigin(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -85,7 +111,13 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
     cors: {
-        origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+        origin: (origin, callback) => {
+            if (isAllowedOrigin(origin)) {
+                callback(null, true);
+                return;
+            }
+            callback(new Error('Not allowed by Socket CORS'));
+        },
         methods: ["GET", "POST"],
         credentials: true
     }
