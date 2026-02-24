@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -62,22 +61,27 @@ const isAllowedOrigin = (origin?: string) => {
     return origin.endsWith('.vercel.app');
 };
 
-const corsOptions: cors.CorsOptions = {
-    origin: (origin, callback) => {
-        if (isAllowedOrigin(origin)) {
-            callback(null, true);
-            return;
-        }
-        callback(null, false);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-};
+// ---------- CORS (manual, bulletproof) ----------
+// The cors npm library sometimes fails behind Cloudflare/Render proxies.
+// Setting headers explicitly guarantees they reach the browser.
+app.use((req, res, next) => {
+    const origin = req.headers.origin as string | undefined;
+    if (isAllowedOrigin(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+        res.setHeader('Access-Control-Max-Age', '86400');
+    }
+    // Preflight
+    if (req.method === 'OPTIONS') {
+        res.sendStatus(204);
+        return;
+    }
+    next();
+});
 
 // Middleware
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -117,14 +121,15 @@ const server = http.createServer(app);
 const io = new SocketIOServer(server, {
     cors: {
         origin: (origin, callback) => {
-            if (isAllowedOrigin(origin)) {
+            if (isAllowedOrigin(origin as string | undefined)) {
                 callback(null, true);
                 return;
             }
             callback(null, false);
         },
         methods: ["GET", "POST"],
-        credentials: true
+        credentials: true,
+        allowedHeaders: ["Content-Type", "Authorization"],
     }
 });
 
