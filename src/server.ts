@@ -19,7 +19,9 @@ import uploadRoutes from './routes/uploadRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import { getBanner } from './controllers/bannerController.js';
 
-// Logger
+// Logger – only write to files in development; in production (Render/Docker)
+// console output is captured by the hosting platform's log aggregation.
+const isProduction = process.env.NODE_ENV === 'production';
 export const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
@@ -33,8 +35,10 @@ export const logger = winston.createLogger({
                 winston.format.simple()
             ),
         }),
-        new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'logs/combined.log' }),
+        ...(isProduction ? [] : [
+            new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
+            new winston.transports.File({ filename: 'logs/combined.log' }),
+        ]),
     ],
 });
 
