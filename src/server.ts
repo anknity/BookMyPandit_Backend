@@ -43,7 +43,8 @@ export const logger = winston.createLogger({
 });
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+// parseInt guards against accidental non-numeric values in the PORT env var
+const PORT = parseInt(process.env.PORT || '5000', 10) || 5000;
 
 const staticAllowedOrigins = [
     'http://localhost:3000',
