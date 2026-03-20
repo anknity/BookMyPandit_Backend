@@ -40,7 +40,7 @@ export async function register(req: AuthRequest, res: Response) {
 // POST /api/auth/login
 export async function login(req: AuthRequest, res: Response) {
     try {
-        const { firebase_uid, email, name, avatar_url } = req.body;
+        const { firebase_uid, email, name, avatar_url, role: requestedRole } = req.body;
 
         const { data: user } = await supabase
             .from('users')
@@ -51,7 +51,7 @@ export async function login(req: AuthRequest, res: Response) {
         if (!user) {
             // Auto-register on first login
             const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase());
-            const role = adminEmails.includes(email?.toLowerCase()) ? 'admin' : 'user';
+            const role = adminEmails.includes(email?.toLowerCase()) ? 'admin' : (requestedRole || 'user');
 
             const { data: newUser, error } = await supabase
                 .from('users')

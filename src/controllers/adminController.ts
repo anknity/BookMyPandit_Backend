@@ -134,10 +134,28 @@ export async function getPandits(req: any, res: Response) {
 export async function approvePandit(req: any, res: Response) {
     try {
         const { id } = req.params;
-        await supabase.from('pandits').update({ is_approved: true, is_verified: true, status: 'active' }).eq('id', id);
+        const { data: pandit, error: panditError } = await supabase
+            .from('pandits')
+            .select('user_id')
+            .eq('id', id)
+            .single();
+        if (panditError) throw panditError;
 
-        const { data: pandit } = await supabase.from('pandits').select('user_id').eq('id', id).single();
-        if (pandit) await createNotification(pandit.user_id, 'Profile Approved', 'Your pandit profile has been approved! You can now receive bookings.', 'approval');
+        const { error: updateError } = await supabase
+            .from('pandits')
+            .update({ is_approved: true, is_verified: true, status: 'active' })
+            .eq('id', id);
+        if (updateError) throw updateError;
+
+        if (pandit?.user_id) {
+            const { error: roleError } = await supabase
+                .from('users')
+                .update({ role: 'pandit' })
+                .eq('id', pandit.user_id);
+            if (roleError) throw roleError;
+
+            await createNotification(pandit.user_id, 'Profile Approved', 'Your pandit profile has been approved! You can now receive bookings.', 'approval');
+        }
 
         await logAdminAction(getAdminId(req), 'approve_pandit', 'pandit', id);
         res.json({ success: true });
@@ -149,7 +167,27 @@ export async function approvePandit(req: any, res: Response) {
 export async function suspendPandit(req: any, res: Response) {
     try {
         const { id } = req.params;
-        await supabase.from('pandits').update({ status: 'suspended', is_approved: false }).eq('id', id);
+        const { data: pandit, error: panditError } = await supabase
+            .from('pandits')
+            .select('user_id')
+            .eq('id', id)
+            .single();
+        if (panditError) throw panditError;
+
+        const { error: updateError } = await supabase
+            .from('pandits')
+            .update({ status: 'suspended', is_approved: false })
+            .eq('id', id);
+        if (updateError) throw updateError;
+
+        if (pandit?.user_id) {
+            const { error: roleError } = await supabase
+                .from('users')
+                .update({ role: 'user' })
+                .eq('id', pandit.user_id);
+            if (roleError) throw roleError;
+        }
+
         await logAdminAction(getAdminId(req), 'suspend_pandit', 'pandit', id);
         res.json({ success: true });
     } catch (error: any) {

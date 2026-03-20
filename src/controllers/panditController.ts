@@ -55,8 +55,13 @@ export async function listAllPandits(req: AuthRequest, res: Response) {
 // PUT /api/pandits/:id/status
 export async function updatePanditStatus(req: AuthRequest, res: Response) {
     try {
-        const { status } = req.body; // 'active', 'suspended', 'rejected'
+        const { status } = req.body as { status?: string };
         const { id } = req.params;
+
+        const validStatuses = ['pending', 'active', 'suspended', 'rejected'];
+        if (!status || !validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status value' });
+        }
 
         const { data, error } = await supabase
             .from('pandits')
@@ -65,12 +70,18 @@ export async function updatePanditStatus(req: AuthRequest, res: Response) {
             .select()
             .single();
 
-        if (data && status === 'active') {
-            // Promote user to pandit role
-            await supabase.from('users').update({ role: 'pandit' }).eq('id', data.user_id);
+        if (error) throw error;
+
+        if (data?.user_id) {
+            const nextRole = status === 'active' ? 'pandit' : 'user';
+            const { error: roleError } = await supabase
+                .from('users')
+                .update({ role: nextRole })
+                .eq('id', data.user_id);
+
+            if (roleError) throw roleError;
         }
 
-        if (error) throw error;
         res.json({ pandit: data });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

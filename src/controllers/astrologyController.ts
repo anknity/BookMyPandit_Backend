@@ -2,51 +2,110 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import { FULL_TAROT_DECK } from '../data/tarotDeck.js';
 import { generateAstrologyResponse } from '../services/aiService.js';
-// https://github.com/cbmgit/horoscope-api
-const BASE_URL = 'https://horoscope-app-api.vercel.app/api/v1/get-horoscope';
+
+const PRIMARY_HOROSCOPE_BASE_URL = 'https://freehoroscopeapi.com/api/v1/get-horoscope';
+const LEGACY_HOROSCOPE_BASE_URL = 'https://horoscope-app-api.vercel.app/api/v1/get-horoscope';
+const OHMANDA_DAILY_BASE_URL = 'https://ohmanda.com/api/horoscope';
+
+function normalizeHoroscopeData(raw: any, fallbackSign: string, fallbackPeriod: string) {
+    const payload = raw?.data ?? raw;
+    const horoscopeText = payload?.horoscope_data || payload?.horoscope || payload?.prediction || payload?.description || '';
+
+    return {
+        date: payload?.date || new Date().toISOString().split('T')[0],
+        sign: payload?.sign || fallbackSign,
+        period: payload?.period || fallbackPeriod,
+        horoscope_data: horoscopeText,
+    };
+}
+
+async function fetchHoroscopeFromProvider(baseUrl: string, period: string, sign: string, day: string) {
+    const endpoint = `${baseUrl}/${period}`;
+    const params = period === 'daily' ? { sign, day } : { sign };
+    const response = await axios.get(endpoint, { params, timeout: 10000 });
+    return normalizeHoroscopeData(response.data, sign, period);
+}
+
+async function fetchFromOhmandaDaily(sign: string) {
+    const response = await axios.get(`${OHMANDA_DAILY_BASE_URL}/${sign.toLowerCase()}/`, { timeout: 10000 });
+    return normalizeHoroscopeData({ data: { ...response.data, period: 'daily' } }, sign, 'daily');
+}
 
 export async function getHoroscope(req: Request, res: Response) {
     try {
         const { sign, period } = req.params; // period can be 'daily', 'weekly', 'monthly'
         const { day = 'today', lang = 'en' } = req.query; // only applicable for daily
 
+        const signParam = Array.isArray(sign) ? sign[0] : sign;
+        const dayParam = Array.isArray(day) ? day[0] : day;
+        const langParam = Array.isArray(lang) ? lang[0] : lang;
+
         // Sanitize period to match API
         const periodParam = Array.isArray(period) ? period[0] : period;
-        const validPeriods = ['daily', 'weekly', 'monthly'];
-        const actualPeriod = validPeriods.includes(periodParam as string) ? periodParam : 'daily';
+        const validPeriods: Array<'daily' | 'weekly' | 'monthly'> = ['daily', 'weekly', 'monthly'];
+        const actualPeriod: 'daily' | 'weekly' | 'monthly' = validPeriods.includes(periodParam as 'daily' | 'weekly' | 'monthly')
+            ? (periodParam as 'daily' | 'weekly' | 'monthly')
+            : 'daily';
 
-        const endpoint = `${BASE_URL}/${actualPeriod}`;
-        const params = actualPeriod === 'daily' ? { sign, day } : { sign };
+        let normalized: {
+            date: string;
+            sign: string;
+            period: string;
+            horoscope_data: string;
+        } | null = null;
 
-        const response = await axios.get(endpoint, { params });
-
-        if (response.data.data) {
-            let horoscopeText = response.data.data.horoscope_data;
-
-            // Translate to Hindi using AI if requested
-            if (lang === 'hi') {
-                try {
-                    const translationPrompt = [
-                        { role: "system", content: "You are a professional English to Hindi translator. Translate the following astrological horoscope reading accurately into natural-sounding, respectful Hindi suitable for an astrology app. Return ONLY the translated Hindi text, nothing else." },
-                        { role: "user", content: horoscopeText }
-                    ];
-                    const translatedText = await generateAstrologyResponse(translationPrompt);
-                    if (translatedText) {
-                        horoscopeText = translatedText;
-                    }
-                } catch (e) {
-                    console.error("Translation failed, falling back to English", e);
-                }
-            }
-
-            res.json({
-                ...response.data.data,
-                horoscope_data: horoscopeText,
-                language: lang
-            });
-        } else {
-            res.status(404).json({ error: 'Horoscope not found' });
+        // 1) Primary free provider
+        try {
+            normalized = await fetchHoroscopeFromProvider(PRIMARY_HOROSCOPE_BASE_URL, actualPeriod, signParam, String(dayParam));
+        } catch (error: any) {
+            console.warn('Primary horoscope provider failed:', error?.message || error);
         }
+
+        // 2) Legacy provider (kept as fallback)
+        if (!normalized?.horoscope_data) {
+            try {
+                normalized = await fetchHoroscopeFromProvider(LEGACY_HOROSCOPE_BASE_URL, actualPeriod, signParam, String(dayParam));
+            } catch (error: any) {
+                console.warn('Legacy horoscope provider failed:', error?.message || error);
+            }
+        }
+
+        // 3) Secondary free API fallback for daily only
+        if ((!normalized?.horoscope_data) && actualPeriod === 'daily') {
+            try {
+                normalized = await fetchFromOhmandaDaily(signParam);
+            } catch (error: any) {
+                console.warn('Ohmanda daily fallback failed:', error?.message || error);
+            }
+        }
+
+        if (!normalized?.horoscope_data) {
+            return res.status(502).json({ error: 'Horoscope data unavailable from external providers' });
+        }
+
+        let horoscopeText = normalized.horoscope_data;
+
+        // Translate to Hindi using AI if requested
+        if (langParam === 'hi') {
+            try {
+                const translationPrompt = [
+                    { role: "system", content: "You are a professional English to Hindi translator. Translate the following astrological horoscope reading accurately into natural-sounding, respectful Hindi suitable for an astrology app. Return ONLY the translated Hindi text, nothing else." },
+                    { role: "user", content: horoscopeText }
+                ];
+                const translatedText = await generateAstrologyResponse(translationPrompt);
+                if (translatedText) {
+                    horoscopeText = translatedText;
+                }
+            } catch (e) {
+                console.error("Translation failed, falling back to English", e);
+            }
+        }
+
+        res.json({
+            ...normalized,
+            horoscope_data: horoscopeText,
+            language: langParam
+        });
     } catch (error: any) {
         console.error('Horoscope API error:', error.message);
         res.status(500).json({ error: 'Failed to fetch horoscope' });
